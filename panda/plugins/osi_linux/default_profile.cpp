@@ -27,22 +27,15 @@ target_ptr_t default_get_current_task_struct(CPUState *cpu)
     target_ptr_t kernel_sp = get_ksp(cpu);
 
     // XXX: This should use THREADINFO_MASK but that's hardcoded and wrong for my test system
-    printf("0x%x ", kernel_sp);
     target_ptr_t task_thread_info = kernel_sp & ~(0x2000 -1);
-    printf("=> masks to 0x%x ", task_thread_info);
 
     current_task_addr=task_thread_info+0xC;
 #else
     current_task_addr = ki.task.current_task_addr;
 #endif
     err = struct_get(cpu, &ts, current_task_addr, ki.task.per_cpu_offset_0_addr);
-    if (err != struct_get_ret_t::SUCCESS) {
-        printf("fail\n");
-        ts = (target_ptr_t)NULL;
+    assert(err == struct_get_ret_t::SUCCESS && "failed to get current task struct");
 
-    }else{
-        printf("success\n");
-    }
     return ts;
 }
 
@@ -54,10 +47,7 @@ target_ptr_t default_get_task_struct_next(CPUState *cpu, target_ptr_t task_struc
     struct_get_ret_t err;
     target_ptr_t tasks;
     err = struct_get(cpu, &tasks, task_struct, ki.task.tasks_offset);
-    if (err != struct_get_ret_t::SUCCESS) {
-        //printf("[OSI PROFILE] failed to get next task\n");
-        return (target_ptr_t)NULL;
-    }
+    assert(err == struct_get_ret_t::SUCCESS && "failed to get next task");
     return tasks-ki.task.tasks_offset;
 }
 
@@ -70,10 +60,7 @@ target_ptr_t default_get_group_leader(CPUState *cpu, target_ptr_t ts)
     target_ptr_t group_leader;
 
     err = struct_get(cpu, &group_leader, ts, ki.task.group_leader_offset);
-    if (err != struct_get_ret_t::SUCCESS) {
-        //printf("[OSI PROFILE] failed to get group leader for task\n");
-        return (target_ptr_t)NULL;
-    }
+    assert(err == struct_get_ret_t::SUCCESS && "failed to get group leader for task");
     return group_leader;
 }
 
