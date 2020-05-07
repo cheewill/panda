@@ -67,12 +67,16 @@ class Ioctl():
             self.guest_buf = None
 
         # Optional OSI usage: process and file name
-        if self.osi:
+        if self.osi and fd != 0xFFFFFFFF:
             proc = panda.plugins['osi'].get_current_process(cpu)
-            proc_name_ptr = proc.name
-            file_name_ptr = panda.plugins['osi_linux'].osi_linux_fd_to_filename(cpu, proc, fd)
-            self.proc_name = ffi.string(proc_name_ptr).decode()
-            self.file_name = ffi.string(file_name_ptr).decode()
+            if proc == ffi.NULL:
+                self.proc_name = None
+                self.file_name = None
+            else:
+                proc_name_ptr = proc.name
+                file_name_ptr = panda.plugins['osi_linux'].osi_linux_fd_to_filename(cpu, proc, fd)
+                self.proc_name = ffi.string(proc_name_ptr).decode() if proc_name_ptr != ffi.NULL else 'unknown'
+                self.file_name = ffi.string(file_name_ptr).decode() if file_name_ptr != ffi.NULL else 'unknown'
         else:
             self.proc_name = None
             self.file_name = None
@@ -84,7 +88,7 @@ class Ioctl():
     def __str__(self):
 
         if self.osi:
-            self_str = "\'{}\' using \'{}\' - ".format(self.proc_name, self.file_name)
+            self_str = "\'{}\' on \'{}\' - ".format(self.proc_name, self.file_name)
         else:
             self_str = ""
 
@@ -101,7 +105,7 @@ class Ioctl():
 
         return (
             self.__class__ == other.__class__ and
-            self.cmd.asUnsigned32 == other.cmd.asUnsigned32 and
+            #self.cmd.asUnsigned32 == other.cmd.asUnsigned32 and
             self.has_buf == other.has_buf and
             self.guest_ptr == other.guest_ptr and
             self.guest_buf == other.guest_buf and
@@ -110,8 +114,7 @@ class Ioctl():
         )
 
     def __hash__(self):
-
-        return hash((self.cmd.asUnsigned32, self.has_buf, self.guest_ptr, self.guest_buf, self.proc_name, self.file_name))
+        return hash((self.guest_ptr, self.proc_name, self.file_name))
 
 class IoctlFaker():
 
@@ -120,20 +123,27 @@ class IoctlFaker():
     Bin all returns into failures (needed forcing) and successes, store for later retrival/analysis.
     '''
 
-    def __init__(self, panda, use_osi_linux = False):
+    def __init__(self, panda, use_osi_linux = False, log_filename=None):
 
         self.osi = use_osi_linux
         self._panda = panda
-        self._panda.load_plugin("syscalls2")
-        self._panda.load_plugin("osi")
-        self._panda.load_plugin("osi_linux")
+        #self._panda.load_plugin("syscalls2")
+        #self._panda.load_plugin("osi")
+        #self._panda.load_plugin("osi_linux")
 
-        self._logger = logging.getLogger('panda.hooking')
+        self._logger = logging.getLogger('panda.ioctls')
         self._logger.setLevel(logging.DEBUG)
 
         # Save runtime memory with sets instead of lists (no duplicates)
         self._fail_returns = set()
         self._success_returns = set()
+        self.target_files = set()
+        self.seen_hack = set()
+
+        # File to save detailed IOCTL logs to
+        self.log_file = None
+        if log_filename:
+            self.log_file = open(log_filename, "w")
 
 		
         # PPC (other arches use the default config)
@@ -148,15 +158,40 @@ class IoctlFaker():
             ioctl = Ioctl(self._panda, cpu, fd, cmd, arg, self.osi)
             ioctl.set_ret_code(self._panda.from_unsigned_guest(cpu.env_ptr.regs[0]))
 
+            faked = False
             if (ioctl.original_ret_code != 0):
-                self._fail_returns.add(ioctl)
-                cpu.env_ptr.regs[0] = 0
-                if ioctl.has_buf:
-                    self._logger.warning("Forcing success return for data-containing {}".format(ioctl))
-                else:
-                    self._logger.info("Forcing success return for data-less {}".format(ioctl))
+
+                if ioctl.file_name in self.target_files:
+                    cpu.env_ptr.regs[0] = 0
+                    faked = True
+
+                    # custom string
+                    bits = ioctl.cmd.bits
+                    direction = ffi.string(ffi.cast("enum ioctl_direction", bits.direction))
+                    ioctl_desc = f"dir={direction},arg_size={bits.arg_size:x},cmd={bits.cmd_num:x},type={bits.type_num:x}"
+                    details = f"ioctl({ioctl_desc},ptr={ioctl.guest_ptr:08x}) -> {ioctl.original_ret_code}"
+                    item = (ioctl.proc_name, ioctl.file_name, direction, bits.arg_size, bits.cmd_num, bits.type_num)
+                    if item not in self.seen_hack:
+                        self.seen_hack.add(item)
+                        self._logger.info(f"Hide IOCTL error from {ioctl.proc_name} on {ioctl.file_name} "+details)
+
+            if self.log_file:
+                end = "\n"
+                if faked:
+                    end = " ** \tCHANGED**\n"
+                self.log_file.write(str(ioctl)+end)
+
+                self._fail_returns.add(ioctl) # Always track failures, even for non-targed files
             else:
                 self._success_returns.add(ioctl)
+                if self.log_file:
+                    self.log_file.write(str(ioctl)+"\n")
+
+    def drop_failures(self, target):
+        '''
+        Store a path that we want to never fail with IOCTLs
+        '''
+        self.target_files.add(target)
 
     def _get_returns(self, source, with_buf_only):
 
