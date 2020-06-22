@@ -26,22 +26,39 @@ class KernelInfo(gdb.Command):
 	def invoke(self, arg, from_tty):
 		global file_out
 		if arg:
-			file_out = open(arg, "w+")	
+			file_out = open(arg, "w+")
 			print(f"Printing output to {arg}") 
-		print("--KERNELINFO-BEGIN--",file=file_out)
+
+		# Grab some info out of order so we can print the [name] helper
+		sysname	    = get_symbol_as_string("init_uts_ns->name->sysname")
 		uts_release = get_symbol_as_string("init_uts_ns->name->release")
 		uts_version = get_symbol_as_string("init_uts_ns->name->version")
 		uts_machine = get_symbol_as_string("init_uts_ns->name->machine")
+		release	    = get_symbol_as_string("init_uts_ns->name->release")
+		versions = release.split(".")
+		bitwidth = 32 if '= 4' in gdb.execute('p sizeof(int)', to_string=True) else 64
+
+		# Generate header for use by panda with -os [name]
+		print(f"[{sysname.lower()}:{release}:{bitwidth}]",file=file_out)
+
 		print(f"name = {uts_release}|{uts_version}|{uts_machine}",file=file_out)
-		release = get_symbol_as_string("init_uts_ns->name->release")
-		version_a,version_b,version_c = release.split(".")
-		if "-" in version_c: # version.c can be of the form 0-42-generic
-			version_c = version_c.split("-")[0]
-		print(f"version.a = {version_a}",file=file_out)
-		print(f"version.b = {version_b}",file=file_out)
-		print(f"version.c = {version_c}",file=file_out)
-		per_cpu_offset_addr = gdb.execute('printf "%llu", &__per_cpu_offset',to_string=True)
-		per_cpu_offset_0_addr = gdb.execute('printf "%llu", __per_cpu_offset[0]',to_string=True)
+		if "-" in versions[3]: # version.c can be of the form 0-42-generic
+			versions[3] = versions[3].split("-")[0]
+		print(f"version.a = {versions[0]}",file=file_out)
+		print(f"version.b = {versions[1]}",file=file_out)
+		print(f"version.c = {versions[2]}",file=file_out)
+		#print(f"version.d = {versions[3]}",file=file_out)
+
+		# TODO: we should use this to generate the file. See issue 651
+		print(f"#arch  = {uts_machine}", file=file_out)
+		try:
+			per_cpu_offset_addr = gdb.execute('printf "%llu", &__per_cpu_offset',to_string=True)
+			per_cpu_offset_0_addr = gdb.execute('printf "%llu", __per_cpu_offset[0]',to_string=True)
+		except Exception as e:
+			# This should be an arch-specific requirement, arm/mips don't have it (#651)
+			assert("x86" not in uts_machine), "Failed to find __per_cpu_offset_data"
+			per_cpu_offset_addr   = 0
+			per_cpu_offset_0_addr = 0
 		print(f"task.per_cpu_offsets_addr = {per_cpu_offset_addr}",file=file_out)
 		print(f"task.per_cpu_offset_0_addr = {per_cpu_offset_0_addr}",file=file_out)
 		
@@ -118,7 +135,7 @@ class KernelInfo(gdb.Command):
 		print_offset("struct dentry",				"d_op",					"path");
 		print_offset("struct dentry_operations",	"d_dname",				"path");
 		print_offset("struct vfsmount",			"mnt_root",				"path");
-		if (int(version_a),int(version_b),int(version_c)) >= (3,0,0):
+		if int(versions[0]) >= 3: # version >= 3.0.0
 			# fields in struct mount 
 			print_offset_from_member("struct mount",	"mnt", "mnt_parent",		"path");
 			print_offset_from_member("struct mount",	"mnt", "mnt_mountpoint",	"path");
@@ -126,7 +143,6 @@ class KernelInfo(gdb.Command):
 			# fields in struct vfsmount 
 			print_offset("struct vfsmount",			"mnt_parent",				"path");
 			print_offset("struct vfsmount",			"mnt_mountpoint",			"path");
-		print( "---KERNELINFO-END---",file=file_out);	
 		if file_out != sys.stdout:
 			file_out.close()
 
