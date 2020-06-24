@@ -620,7 +620,7 @@ void init_per_cpu_offsets(CPUState *cpu) {
  */
 bool init_plugin(void *self) {
     // Register callbacks to the PANDA core.
-#if defined(TARGET_I386) || defined(TARGET_ARM)
+#if defined(TARGET_I386) || defined(TARGET_ARM) || defined(TARGET_MIPS)
     {
         panda_cb pcb = { .after_machine_init = init_per_cpu_offsets };
         panda_register_callback(self, PANDA_CB_AFTER_MACHINE_INIT, pcb);
@@ -654,13 +654,13 @@ bool init_plugin(void *self) {
         if (kconffile_canon == NULL) {  // from build dir
             if (kconf_file != NULL) g_free(kconf_file);
             kconf_file = g_build_filename(progdir, "panda", "plugins", "osi_linux", "kernelinfo.conf", NULL);
-            LOG_INFO("Looking for kconf_file attempt %u: %s", kconf_file_try++, kconf_file);
+            LOG_INFO("Looking for kconf_file attempt %u: %s", 1, kconf_file);
             kconffile_canon = realpath(kconf_file, NULL);
         }
         if (kconffile_canon == NULL) {  // from etc dir (installed location)
             if (kconf_file != NULL) g_free(kconf_file);
             kconf_file = g_build_filename(CONFIG_QEMU_CONFDIR, "osi_linux", "kernelinfo.conf", NULL);
-            LOG_INFO("Looking for kconf_file attempt %u: %s", kconf_file_try++, kconf_file);
+            LOG_INFO("Looking for kconf_file attempt %u: %s", 2, kconf_file);
             kconffile_canon = realpath(kconf_file, NULL);
         }
 
