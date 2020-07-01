@@ -93,12 +93,10 @@ void taint_set(Shad *shad_dest, uint64_t dest, uint64_t dest_size,
 void taint_mix(Shad *shad, uint64_t dest, uint64_t dest_size, uint64_t src,
                uint64_t src_size, llvm::Instruction *I);
 
+int get_pred(llvm::CmpInst::Predicate p);
 // Tainted compare. woo
 // TYPE: 0 = const, 1: var
-void log_tainted_cmp(Shad *shad, uint64_t src1, uint64_t src1_size,
-                       uint64_t src2, uint64_t src2_size,
-                       llvm::Instruction *ignored,
-                       uint64_t type1, uint64_t type2);
+void log_tainted_cmp(Shad *shad, llvm::Instruction *I, uint64_t slot1, uint64_t slot2);
 
 // Tainted pointer load in tainted pointer mode.
 // Mixes the ptr labels and parallels that with each src label.
